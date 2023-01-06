@@ -12,42 +12,92 @@ var gt = gremlingo.P.Gt
 var order = gremlingo.Order
 
 
-func addBookmark(g *gremlingo.GraphTraversalSource, path string) <-chan error {
-    promise := g.AddV("bookmark").Property("path", path).Iterate()
-
-    return promise
+type FileSystem struct {
+    driverRemoteConnection gremlingo.DriverRemoteConnection
+    g *gremlingo.GraphTraversalSource
+}
+type Bookmark struct {
+    path, name string
 }
 
-func main() {
-	// Creating the connection to the server.
-	driverRemoteConnection, err := gremlingo.NewDriverRemoteConnection("ws://localhost:8182/gremlin")
+func NewFileSystem(connectionString string) (*FileSystem, error) {
+    // Creating the connection to the server.
+	driverRemoteConnection, err := gremlingo.NewDriverRemoteConnection(connectionString)
 	if err != nil {
-		fmt.Println(err)
-		return
+		return nil, err
 	}
 	// Creating graph traversal
 	g := gremlingo.Traversal_().WithRemote(driverRemoteConnection)
 
-    
-    // Wait for all steps to finish execution and check for error.
-    promiseErr := <-addBookmark(g, "S:\\ds13\\Projects\\--personal\\KnowledgeBase\\FileSystem")
-    if promiseErr != nil {
-        fmt.Println(promiseErr)
+    fs := &FileSystem{driverRemoteConnection: *driverRemoteConnection, g: g}
+
+    return fs, nil
+}
+
+
+func (fs *FileSystem) addBookmark(b Bookmark) <-chan error {
+    promise := fs.g.AddV("bookmark").Property("path", b.path).Property("name", b.name).Iterate()
+
+    return promise
+}
+
+// FIX: Rise errors to stop upper level executions if something wasn't added.
+func (fs *FileSystem) addBookmarks(bookmarks []Bookmark) {
+    for _, bookmark := range bookmarks {
+        // Wait for all steps to finish execution and check for error.
+        promiseErr := <-fs.addBookmark(bookmark)
+        if promiseErr != nil {
+            fmt.Println(promiseErr)
+            return 
+        }
+    }
+}
+
+// Perform traversal
+func (fs *FileSystem) getBookmarks() []*gremlingo.Result {
+    result, err := fs.g.V().HasLabel("bookmark").Values("path").ToList()
+	if result == nil {
+		return nil
+	}
+	if err != nil {
+        fmt.Println(err)
+		return nil
+	}
+
+	return result
+}
+
+func (fs *FileSystem) getBookmarksByName(name string) []*gremlingo.Result {
+    result, err := fs.g.V().HasLabel("bookmark").Has("name", name).Values("path").ToList()
+	if result == nil {
+		return nil
+	}
+	if err != nil {
+        fmt.Println(err)
+		return nil
+	}
+
+	return result
+}
+
+func main() {
+    fs, err := NewFileSystem("ws://localhost:8182/gremlin")
+    if err != nil {
+        fmt.Println(err)
         return
     }
 
-	// Perform traversal
-    result, err := g.V().Values().ToList()
-	// result, err := g.V().HasLabel("person").Has("age", __.Is(gt(28))).Order().By("age", order.Desc).Values("name").ToList()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-    fmt.Println("test")
-	for _, r := range result {
-		fmt.Println(r.GetString())
+    // fs.addBookmarks([]Bookmark{
+    //     { name: "FileSystem", path: "S:\\ds13\\Projects\\--personal\\KnowledgeBase\\FileSystem\\" },
+    //     { name: "Bomonka", path: "E:\\Projects\\--educational\\Bomonka\\" },
+    //     { name: "Configs", path: "E:\\Scripts\\" },
+    // })
+
+    vertices := fs.getBookmarksByName("Bomonka")
+    for _, v := range vertices {
+		fmt.Println(v.GetString())
 	}
 
     // Cleanup
-    defer driverRemoteConnection.Close()
+    defer fs.driverRemoteConnection.Close()
 }
